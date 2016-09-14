@@ -43,7 +43,7 @@ class P4Host(Host):
             self.defaultIntf().MAC()
         )
         print "**********"
-        
+
 class P4Switch(Switch):
     """P4 virtual switch"""
     device_id = 0
@@ -54,6 +54,7 @@ class P4Switch(Switch):
                   verbose = False,
                   device_id = None,
                   enable_debugger = False,
+                  log_dir = None,
                   **kwargs ):
         Switch.__init__( self, name, **kwargs )
         assert(sw_path)
@@ -61,8 +62,11 @@ class P4Switch(Switch):
         self.sw_path = sw_path
         self.json_path = json_path
         self.verbose = verbose
-        logfile = '/tmp/p4s.%s.log' % self.name
-        self.output = open(logfile, 'w')
+        if log_dir:
+            self.logfile = '%s/p4s.%s.log' % (log_dir, self.name)
+        else:
+            self.logfile = '/tmp/p4s.%s.log' % self.name
+        self.output = open(self.logfile, 'w')
         self.thrift_port = thrift_port
         self.pcap_dump = pcap_dump
         self.enable_debugger = enable_debugger
@@ -99,10 +103,11 @@ class P4Switch(Switch):
         args.append(self.json_path)
         if self.enable_debugger:
             args.append("--debugger")
-        logfile = '/tmp/p4s.%s.log' % self.name
+        if self.verbose:
+            args.append("--log-console")
         print ' '.join(args)
 
-        self.cmd( ' '.join(args) + ' >' + logfile + ' 2>&1 &' )
+        self.cmd( ' '.join(args) + ' >' + self.logfile + ' 2>&1 &' )
         # self.cmd( ' '.join(args) + ' > /dev/null 2>&1 &' )
 
         print "switch has been started"
