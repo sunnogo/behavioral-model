@@ -86,7 +86,7 @@ P4Objects::build_expression(const Json::Value &json_expression,
     int field_offset = get_field_offset(header_id, field_name);
     expr->push_back_load_field(header_id, field_offset);
 
-    phv_factory.enable_field_arith(header_id, field_offset);
+    enable_arith(header_id, field_offset);
   } else if (type == "bool") {
     expr->push_back_load_bool(json_value.asBool());
   } else if (type == "hexstr") {
@@ -204,8 +204,10 @@ P4Objects::init_objects(std::istream *is,
     header_stack_to_type_map[header_stack_name] = header_stack_type;
 
     std::vector<header_id_t> header_ids;
-    for (const auto &cfg_header_id : cfg_header_stack["header_ids"])
+    for (const auto &cfg_header_id : cfg_header_stack["header_ids"]) {
       header_ids.push_back(cfg_header_id.asInt());
+      header_id_to_stack_id[cfg_header_id.asInt()] = header_stack_id;
+    }
 
     phv_factory.push_back_header_stack(header_stack_name, header_stack_id,
                                        *header_stack_type, header_ids);
@@ -338,7 +340,7 @@ P4Objects::init_objects(std::istream *is,
           assert(dest_type == "field");
           const auto dest = field_info(cfg_dest["value"][0].asString(),
                                        cfg_dest["value"][1].asString());
-          phv_factory.enable_field_arith(std::get<0>(dest), std::get<1>(dest));
+          enable_arith(std::get<0>(dest), std::get<1>(dest));
 
           const string &src_type = cfg_src["type"].asString();
           if (src_type == "field") {
@@ -347,7 +349,7 @@ P4Objects::init_objects(std::istream *is,
             parse_state->add_set_from_field(
               std::get<0>(dest), std::get<1>(dest),
               std::get<0>(src), std::get<1>(src));
-            phv_factory.enable_field_arith(std::get<0>(src), std::get<1>(src));
+            enable_arith(std::get<0>(src), std::get<1>(src));
           } else if (src_type == "hexstr") {
             parse_state->add_set_from_data(
               std::get<0>(dest), std::get<1>(dest),
@@ -651,7 +653,7 @@ P4Objects::init_objects(std::istream *is,
           int field_offset = get_field_offset(header_id, field_name);
           action_fn->parameter_push_back_field(header_id, field_offset);
 
-          phv_factory.enable_field_arith(header_id, field_offset);
+          enable_arith(header_id, field_offset);
         } else if (type == "calculation") {
           const string name = cfg_parameter["value"].asString();
           NamedCalculation *calculation = get_named_calculation(name);
@@ -714,8 +716,8 @@ P4Objects::init_objects(std::istream *is,
 
   // pipelines
 
-  ageing_monitor = std::unique_ptr<AgeingMonitor>(
-      new AgeingMonitor(device_id, cxt_id, notifications_transport));
+  ageing_monitor = AgeingMonitorIface::make(
+      device_id, cxt_id, notifications_transport);
 
   std::unordered_map<std::string, MatchKeyParam::Type> map_name_to_match_type =
       { {"exact", MatchKeyParam::Type::EXACT},
@@ -1053,8 +1055,7 @@ P4Objects::init_objects(std::istream *is,
 
   // learn lists
 
-  learn_engine = std::unique_ptr<LearnEngine>(
-      new LearnEngine(device_id, cxt_id));
+  learn_engine = LearnEngineIface::make(device_id, cxt_id);
 
   const Json::Value &cfg_learn_lists = cfg_root["learn_lists"];
 
@@ -1063,7 +1064,7 @@ P4Objects::init_objects(std::istream *is,
   }
 
   for (const auto &cfg_learn_list : cfg_learn_lists) {
-    LearnEngine::list_id_t list_id = cfg_learn_list["id"].asInt();
+    LearnEngineIface::list_id_t list_id = cfg_learn_list["id"].asInt();
     learn_engine->list_create(list_id, 16);  // 16 is max nb of samples
     learn_engine->list_set_learn_writer(list_id, notifications_transport);
 
@@ -1120,7 +1121,7 @@ P4Objects::init_objects(std::istream *is,
     for (const auto &cfg_field : cfg_force_arith) {
       const auto field = field_info(cfg_field[0].asString(),
                                     cfg_field[1].asString());
-      phv_factory.enable_field_arith(std::get<0>(field), std::get<1>(field));
+      enable_arith(std::get<0>(field), std::get<1>(field));
     }
   }
 
@@ -1133,7 +1134,7 @@ P4Objects::init_objects(std::istream *is,
       //           << " does not exist but required for arith, ignoring\n";
     } else {
       const auto field = field_info(p.first, p.second);
-      phv_factory.enable_field_arith(std::get<0>(field), std::get<1>(field));
+      enable_arith(std::get<0>(field), std::get<1>(field));
     }
   }
 
@@ -1260,6 +1261,16 @@ P4Objects::check_hash(const std::string &name) const {
   return h;
 }
 
+void
+P4Objects::enable_arith(header_id_t header_id, int field_offset) {
+  auto it = header_id_to_stack_id.find(header_id);
+  if (it == header_id_to_stack_id.end()) {
+    phv_factory.enable_field_arith(header_id, field_offset);
+  } else {
+    phv_factory.enable_stack_field_arith(it->second, field_offset);
+  }
+}
+
 MeterArray *
 P4Objects::get_meter_array_rt(const std::string &name) const {
   auto it = meter_arrays.find(name);
@@ -1282,6 +1293,24 @@ ParseVSet *
 P4Objects::get_parse_vset_rt(const std::string &name) const {
   auto it = parse_vsets.find(name);
   return (it != parse_vsets.end()) ? it->second.get() : nullptr;
+}
+
+Parser *
+P4Objects::get_parser_rt(const std::string &name) const {
+  auto it = parsers.find(name);
+  return (it != parsers.end()) ? it->second.get() : nullptr;
+}
+
+Deparser *
+P4Objects::get_deparser_rt(const std::string &name) const {
+  auto it = deparsers.find(name);
+  return (it != deparsers.end()) ? it->second.get() : nullptr;
+}
+
+Pipeline *
+P4Objects::get_pipeline_rt(const std::string &name) const {
+  auto it = pipelines_map.find(name);
+  return (it != pipelines_map.end()) ? it->second.get() : nullptr;
 }
 
 }  // namespace bm

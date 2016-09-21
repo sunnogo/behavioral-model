@@ -48,9 +48,19 @@ TEST(P4Objects, LoadFromJSON1) {
   ASSERT_EQ(0, objects.init_objects(&is, &factory));
 
   ASSERT_NE(nullptr, objects.get_pipeline("ingress"));
+  ASSERT_ANY_THROW(objects.get_pipeline("bad_pipeline"));
+  ASSERT_EQ(nullptr, objects.get_pipeline_rt("bad_pipeline"));
+
   ASSERT_NE(nullptr, objects.get_action("ipv4_lpm", "_drop"));
+
   ASSERT_NE(nullptr, objects.get_parser("parser"));
+  ASSERT_ANY_THROW(objects.get_parser("bad_parser"));
+  ASSERT_EQ(nullptr, objects.get_parser_rt("bad_parser"));
+
   ASSERT_NE(nullptr, objects.get_deparser("deparser"));
+  ASSERT_ANY_THROW(objects.get_deparser("bad_deparser"));
+  ASSERT_EQ(nullptr, objects.get_deparser_rt("bad_deparser"));
+
   MatchTableAbstract *table;
   table = objects.get_abstract_match_table("forward");
   ASSERT_NE(nullptr, table);
@@ -287,4 +297,36 @@ TEST(P4Objects, ParseVset) {
   ASSERT_NE(nullptr, parse_vset_2);
   ASSERT_EQ("pv1", parse_vset_1->get_name());
   ASSERT_EQ(16, parse_vset_1->get_compressed_bitwidth());
+}
+
+extern bool WITH_VALGRIND; // defined in main.cpp
+
+TEST(P4Objects, HeaderStackArith) {
+  std::unique_ptr<PHV> phv;
+
+  // gtest complains when a deathtest has multiple threads running
+  // by adding a nested scope here, I ensure that the threads started by
+  // P4Objects are destroyed before ASSERT_DEATH
+  {
+    fs::path json_path = fs::path(TESTDATADIR) / fs::path("header_stack.json");
+    std::ifstream is(json_path.string());
+    P4Objects objects;
+    LookupStructureFactory factory;
+    ASSERT_EQ(0, objects.init_objects(&is, &factory));
+    const auto &phv_factory = objects.get_phv_factory();
+    phv = phv_factory.create();
+  }
+
+  // check that arith has been enabled on hdr[x].f1 (but not on hdr[x].f2)
+  const auto &h0_f1 = phv->get_field("hdr[0].f1");
+  const auto &h1_f1 = phv->get_field("hdr[1].f1");
+  const auto &h0_f2 = phv->get_field("hdr[0].f2");
+  const auto &h1_f2 = phv->get_field("hdr[1].f2");
+  ASSERT_NO_THROW(h1_f1.get_int());
+  ASSERT_NO_THROW(h0_f1.get_int());
+
+  if (!WITH_VALGRIND) {
+    ASSERT_DEATH(h0_f2.get_int(), "Assertion .* failed");
+    ASSERT_DEATH(h1_f2.get_int(), "Assertion .* failed");
+  }
 }

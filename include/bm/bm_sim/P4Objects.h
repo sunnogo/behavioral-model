@@ -98,9 +98,9 @@ class P4Objects {
  public:
   PHVFactory &get_phv_factory() { return phv_factory; }
 
-  LearnEngine *get_learn_engine() { return learn_engine.get(); }
+  LearnEngineIface *get_learn_engine() { return learn_engine.get(); }
 
-  AgeingMonitor *get_ageing_monitor() { return ageing_monitor.get(); }
+  AgeingMonitorIface *get_ageing_monitor() { return ageing_monitor.get(); }
 
   void reset_state();
 
@@ -124,9 +124,15 @@ class P4Objects {
     return t_actions_map.at(std::make_pair(table_name, action_name));
   }
 
+  // For most functions I have a get_* version that will throw an exception if
+  // an element does not exist (exception not caught) and a get_*_rt version
+  // that returns a nullptr if it does not exist. I should probably get rid of
+  // the first version...
   Parser *get_parser(const std::string &name) const {
     return parsers.at(name).get();
   }
+
+  Parser *get_parser_rt(const std::string &name) const;
 
   ParseVSet *get_parse_vset(const std::string &name) const {
     return parse_vsets.at(name).get();
@@ -137,6 +143,8 @@ class P4Objects {
   Deparser *get_deparser(const std::string &name) const {
     return deparsers.at(name).get();
   }
+
+  Deparser *get_deparser_rt(const std::string &name) const;
 
   MatchTableAbstract *get_abstract_match_table(const std::string &name) const {
     return match_action_tables_map.at(name)->get_match_table();
@@ -157,6 +165,8 @@ class P4Objects {
   Pipeline *get_pipeline(const std::string &name) const {
     return pipelines_map.at(name).get();
   }
+
+  Pipeline *get_pipeline_rt(const std::string &name) const;
 
   MeterArray *get_meter_array(const std::string &name) const {
     return meter_arrays.at(name).get();
@@ -192,6 +202,9 @@ class P4Objects {
                     const std::string &field_name) const;
 
   bool header_exists(const std::string &header_name) const;
+
+  // public to be accessed by test class
+  std::ostream &outstream;
 
  private:
   void add_header_type(const std::string &name,
@@ -352,9 +365,9 @@ class P4Objects {
 
   std::unordered_map<std::string, std::unique_ptr<Deparser> > deparsers{};
 
-  std::unique_ptr<LearnEngine> learn_engine{};
+  std::unique_ptr<LearnEngineIface> learn_engine{};
 
-  std::unique_ptr<AgeingMonitor> ageing_monitor{};
+  std::unique_ptr<AgeingMonitorIface> ageing_monitor{};
 
   // meter arrays
   std::unordered_map<std::string, std::unique_ptr<MeterArray> > meter_arrays{};
@@ -380,9 +393,8 @@ class P4Objects {
 
   std::unordered_map<std::string, header_field_pair> field_aliases{};
 
- public:
-  // public to be accessed by test class
-  std::ostream &outstream;
+  // used for initialization only
+  std::unordered_map<p4object_id_t, p4object_id_t> header_id_to_stack_id{};
 
  private:
   int get_field_offset(header_id_t header_id, const std::string &field_name);
@@ -396,6 +408,8 @@ class P4Objects {
 
   std::unique_ptr<CalculationsMap::MyC> check_hash(
       const std::string &name) const;
+
+  void enable_arith(header_id_t header_id, int field_offset);
 };
 
 }  // namespace bm

@@ -10,7 +10,7 @@ libtestutils_la_SOURCES = utils.h utils.cpp
 libtestutils_la_LIBADD = $(top_builddir)/src/bm_sim/libbmsim.la
 
 AM_CPPFLAGS += \
--isystem $(top_srcdir)/third_party \
+-isystem $(top_srcdir)/third_party/gtest/include \
 -DTESTDATADIR=\"$(srcdir)/testdata\"
 AM_CXXFLAGS = -pthread
 LDADD = \
@@ -123,4 +123,6 @@ testdata/runtime_iface.p4 \
 testdata/runtime_iface.json \
 testdata/one_header.json \
 testdata/parse_vset.p4 \
-testdata/parse_vset.json
+testdata/parse_vset.json \
+testdata/header_stack.p4 \
+testdata/header_stack.json

@@ -530,6 +530,16 @@ public:
   template <typename E>
   void build_action_entry(BmActionEntry *action_e, const E &entry);
 
+  template <typename E>
+  void copy_entry_life_info(BmMtEntry *e, const E &entry) {
+    if (entry.timeout_ms != 0) {
+      BmMtEntryLife entry_life;
+      entry_life.timeout_ms = entry.timeout_ms;
+      entry_life.time_since_hit_ms = entry.time_since_hit_ms;
+      e->__set_life(entry_life);
+    }
+  }
+
   template <typename M,
             typename std::vector<typename M::Entry> (RuntimeInterface::*GetFn)(
                 size_t, const std::string &) const>
@@ -540,6 +550,7 @@ public:
       BmMtEntry e;
       copy_match_part_entry(&e, entry);
       build_action_entry(&e.action_entry, entry);
+      copy_entry_life_info(&e, entry);
       _return.push_back(std::move(e));
     }
   }
@@ -558,6 +569,7 @@ public:
     }
     copy_match_part_entry(&e, entry);
     build_action_entry(&e.action_entry, entry);
+    copy_entry_life_info(&e, entry);
   }
 
   void bm_mt_get_entries(std::vector<BmMtEntry> & _return, const int32_t cxt_id, const std::string& table_name) {
@@ -741,9 +753,9 @@ public:
 
   void bm_learning_ack(const int32_t cxt_id, const BmLearningListId list_id, const BmLearningBufferId buffer_id, const std::vector<BmLearningSampleId> & sample_ids) {
     Logger::get()->trace("bm_learning_ack");
-    LearnEngine::LearnErrorCode error_code =
+    auto error_code =
         switch_->get_learn_engine(cxt_id)->ack(list_id, buffer_id, sample_ids);
-    if (error_code != LearnEngine::LearnErrorCode::SUCCESS) {
+    if (error_code != LearnEngineIface::LearnErrorCode::SUCCESS) {
       InvalidLearnOperation ilo;
       ilo.code = (LearnOperationErrorCode::type) error_code;
       throw ilo;
@@ -752,9 +764,9 @@ public:
 
   void bm_learning_ack_buffer(const int32_t cxt_id, const BmLearningListId list_id, const BmLearningBufferId buffer_id) {
     Logger::get()->trace("bm_learning_ack_buffer");
-    LearnEngine::LearnErrorCode error_code =
+    auto error_code =
         switch_->get_learn_engine(cxt_id)->ack_buffer(list_id, buffer_id);
-    if (error_code != LearnEngine::LearnErrorCode::SUCCESS) {
+    if (error_code != LearnEngineIface::LearnErrorCode::SUCCESS) {
       InvalidLearnOperation ilo;
       ilo.code = (LearnOperationErrorCode::type) error_code;
       throw ilo;
@@ -763,10 +775,9 @@ public:
 
   void bm_learning_set_timeout(const int32_t cxt_id, const BmLearningListId list_id, const int32_t timeout_ms) {
     Logger::get()->trace("bm_learning_set_timeout");
-    LearnEngine::LearnErrorCode error_code =
-        switch_->get_learn_engine(cxt_id)->list_set_timeout(
-            list_id, timeout_ms);
-    if (error_code != LearnEngine::LearnErrorCode::SUCCESS) {
+    auto error_code = switch_->get_learn_engine(cxt_id)->list_set_timeout(
+        list_id, timeout_ms);
+    if (error_code != LearnEngineIface::LearnErrorCode::SUCCESS) {
       InvalidLearnOperation ilo;
       ilo.code = (LearnOperationErrorCode::type) error_code;
       throw ilo;
@@ -775,10 +786,9 @@ public:
 
   void bm_learning_set_buffer_size(const int32_t cxt_id, const BmLearningListId list_id, const int32_t nb_samples) {
     Logger::get()->trace("bm_learning_set_buffer_size");
-    LearnEngine::LearnErrorCode error_code =
-        switch_->get_learn_engine(cxt_id)->list_set_max_samples(
-            list_id, nb_samples);
-    if (error_code != LearnEngine::LearnErrorCode::SUCCESS) {
+    auto error_code = switch_->get_learn_engine(cxt_id)->list_set_max_samples(
+        list_id, nb_samples);
+    if (error_code != LearnEngineIface::LearnErrorCode::SUCCESS) {
       InvalidLearnOperation ilo;
       ilo.code = (LearnOperationErrorCode::type) error_code;
       throw ilo;

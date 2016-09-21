@@ -36,6 +36,7 @@ using std::to_string;
 
 using std::chrono::milliseconds;
 using std::this_thread::sleep_until;
+using std::this_thread::sleep_for;
 
 typedef MatchTableAbstract::ActionEntry ActionEntry;
 typedef MatchUnitExact<ActionEntry> MUExact;
@@ -801,6 +802,8 @@ TYPED_TEST(TableSizeTwo, GetEntries) {
     ASSERT_EQ(keys[i], e.match_key[0].key);
     ASSERT_EQ(&this->action_fn, e.action_fn);
     ASSERT_EQ(0u, e.action_data.size());
+    ASSERT_EQ(0u, e.timeout_ms);
+    ASSERT_EQ(0u, e.time_since_hit_ms);
   }
 }
 
@@ -1189,6 +1192,8 @@ TEST_F(TableIndirect, GetEntries) {
     ASSERT_EQ(keys[i], e.match_key[0].key);
     ASSERT_EQ(mbrs[i % num_mbrs], e.mbr);
     ASSERT_EQ(-1, e.priority);
+    ASSERT_EQ(0u, e.timeout_ms);
+    ASSERT_EQ(0u, e.time_since_hit_ms);
   }
 
   for (size_t i = 0; i < num_mbrs; i++) {
@@ -1510,6 +1515,8 @@ TEST_F(TableIndirectWS, GetEntries) {
   ASSERT_EQ(std::numeric_limits<mbr_hdl_t>::max(), e1.mbr);
   ASSERT_EQ(grp, e1.grp);
   ASSERT_EQ(-1, e1.priority);
+  ASSERT_EQ(0u, e1.timeout_ms);
+  ASSERT_EQ(0u, e1.time_since_hit_ms);
 
   const auto &g1 = groups[0];
   ASSERT_EQ(grp, g1.grp);
@@ -1530,6 +1537,8 @@ TEST_F(TableIndirectWS, GetEntries) {
   ASSERT_EQ(mbr_1, e2.mbr);
   ASSERT_EQ(std::numeric_limits<grp_hdl_t>::max(), e2.grp);
   ASSERT_EQ(-1, e2.priority);
+  ASSERT_EQ(0u, e2.timeout_ms);
+  ASSERT_EQ(0u, e2.time_since_hit_ms);
 }
 
 
@@ -2006,6 +2015,97 @@ TEST_F(AdvancedTernaryTest, Lookup1) {
 }
 
 
+class HiddenValidFieldTest : public AdvancedTest {
+ protected:
+  HiddenValidFieldTest()
+      : AdvancedTest() {
+    int offset = testHeaderType.get_hidden_offset(HeaderType::HiddenF::VALID);
+    key_builder.push_back_field(testHeader1, offset, 1,
+                                MatchKeyParam::Type::TERNARY);
+    key_builder.push_back_field(testHeader2, 0, 16, MatchKeyParam::Type::EXACT);
+
+    std::unique_ptr<MUTernary> match_unit;
+    match_unit = std::unique_ptr<MUTernary>(
+        new MUTernary(t_size, key_builder, &lookup_factory));
+    table = std::unique_ptr<MatchTable>(
+        new MatchTable("test_table", 0, std::move(match_unit), false));
+    table->set_next_node(0, nullptr);
+  }
+
+  virtual void SetUp() {
+    AdvancedTest::SetUp();
+  }
+
+  MatchErrorCode add_entry(const std::string &exact_v,
+                           bool is_valid, bool is_masked,
+                           entry_handle_t *handle) {
+    std::vector<MatchKeyParam> match_key;
+    //10.00/12
+    std::string valid_key = is_valid ?
+        std::string("\x01", 1) : std::string("\x00", 1);
+    std::string valid_mask = is_masked ?
+        std::string("\x01", 1) : std::string("\x00", 1);
+    match_key.emplace_back(MatchKeyParam::Type::TERNARY,
+                           std::move(valid_key), std::move(valid_mask));
+    match_key.emplace_back(MatchKeyParam::Type::EXACT, exact_v);
+    return table->add_entry(match_key, &action_fn, ActionData(), handle);
+  }
+
+  Packet gen_pkt(const std::string &exact_v, bool is_valid) const {
+    Packet packet = Packet::make_new(
+        128, PacketBuffer(256), phv_source.get());
+    PHV *phv = packet.get_phv();
+    if (is_valid) phv->get_header(testHeader1).mark_valid();
+    phv->get_header(testHeader2).mark_valid();
+    Field &h2_f16 = phv->get_field(testHeader2, 0);
+    h2_f16.set(exact_v.data(), exact_v.size());
+    return packet;
+  }
+};
+
+TEST_F(HiddenValidFieldTest, Lookup) {
+  entry_handle_t h1, h2;
+  entry_handle_t lookup_handle;
+  bool hit;
+  const std::string exact_v_1("\xab\x15", 2);
+  const std::string exact_v_2("\xab\xcd", 2);
+
+  // needs header1 to be valid
+  ASSERT_EQ(MatchErrorCode::SUCCESS,
+            add_entry(exact_v_1, true, true, &h1));
+  // do not care about header1's validity
+  ASSERT_EQ(MatchErrorCode::SUCCESS,
+            add_entry(exact_v_2, true, false, &h2));
+
+  {
+    auto pkt = gen_pkt(exact_v_1, false);
+    table->lookup(pkt, &hit, &lookup_handle);
+    ASSERT_FALSE(hit);
+  }
+  {
+    auto pkt = gen_pkt(exact_v_2, false);
+    table->lookup(pkt, &hit, &lookup_handle);
+    ASSERT_TRUE(hit); ASSERT_EQ(h2, lookup_handle);
+  }
+  {
+    auto pkt = gen_pkt(exact_v_1, true);
+    table->lookup(pkt, &hit, &lookup_handle);
+    ASSERT_TRUE(hit); ASSERT_EQ(h1, lookup_handle);
+  }
+  {
+    auto pkt = gen_pkt(exact_v_2, true);
+    table->lookup(pkt, &hit, &lookup_handle);
+    ASSERT_TRUE(hit); ASSERT_EQ(h2, lookup_handle);
+  }
+  {
+    auto pkt = gen_pkt(exact_v_1, true);
+    pkt.get_phv()->get_header(testHeader1).mark_invalid();
+    table->lookup(pkt, &hit, &lookup_handle);
+    ASSERT_FALSE(hit);
+  }
+}
+
+
 template <typename MUType>
 class TableEntryDebug : public ::testing::Test {
  protected:
@@ -2034,11 +2134,11 @@ class TableEntryDebug : public ::testing::Test {
 
     set_key_builder();
 
-    // true enables counters
     match_unit = std::unique_ptr<MUType>(
         new MUType(t_size, key_builder, &lookup_factory));
+    // disable counters, enable ageing
     table = std::unique_ptr<MatchTable>(
-        new MatchTable("test_table", 0, std::move(match_unit), false));
+        new MatchTable("test_table", 0, std::move(match_unit), false, true));
     table->set_next_node(0, nullptr);
   }
 
@@ -2279,6 +2379,27 @@ TYPED_TEST(TableEntryDebug, GetEntry) {
   this->table->get_entry(handle, &entry);
   ASSERT_TRUE(cmp_match_keys(this->gen_match_key(), entry.match_key));
   ASSERT_EQ(this->action_data.get(0), entry.action_data.get(0));
+  ASSERT_EQ(0u, entry.timeout_ms);
+  ASSERT_GT(400u, entry.time_since_hit_ms);  // 400ms just to be safe
+}
+
+TYPED_TEST(TableEntryDebug, GetEntryWTimeout) {
+  entry_handle_t handle;
+  ASSERT_EQ(MatchErrorCode::SUCCESS, this->add_entry(&handle));
+  uint32_t timeout_ms = 2345;  // 2.345 seconds
+  ASSERT_EQ(MatchErrorCode::SUCCESS,
+            this->table->set_entry_ttl(handle, timeout_ms));
+
+  uint32_t sleep_ms = 1500;
+  sleep_for(milliseconds(sleep_ms));
+  uint32_t tolerance_ms = 400;
+
+  MatchTable::Entry entry;
+  this->table->get_entry(handle, &entry);
+  ASSERT_TRUE(cmp_match_keys(this->gen_match_key(), entry.match_key));
+  ASSERT_EQ(this->action_data.get(0), entry.action_data.get(0));
+  ASSERT_EQ(timeout_ms, entry.timeout_ms);
+  ASSERT_NEAR(sleep_ms, entry.time_since_hit_ms, tolerance_ms);
 }
 
 TYPED_TEST(TableEntryDebug, DumpEntry) {

@@ -213,10 +213,10 @@ MatchKeyBuilder::operator()(const PHV &phv, ByteContainer *key) const {
       // we do not reset all fields to 0 in between packets
       // so I need this hack if the P4 programmer assumed that:
       // field not valid => field set to 0
-      // const Field &field = phv.get_field(p.first, p.second);
-      // key->append(field.get_bytes());
+      // for hidden fields, we want the actual value, even though for $valid$,
+      // it does not make a difference
       const Field &field = header[in.f_offset];
-      if (header.is_valid()) {
+      if (header.is_valid() || field.is_hidden()) {
         key->append(field.get_bytes());
       } else {
         key->append(std::string(field.get_nbytes(), '\x00'));
@@ -730,6 +730,9 @@ MatchUnitAbstract_::set_entry_ttl(entry_handle_t handle, unsigned int ttl_ms) {
   if (!this->valid_handle_(handle_)) return MatchErrorCode::INVALID_HANDLE;
   EntryMeta &meta = entry_meta[handle_];
   meta.timeout_ms = ttl_ms;
+  // reset timestamp so that entries are not aged right away even if they have
+  // not been hit in a while (i.e. timeout starts now)
+  meta.ts.set(Packet::clock::now());
   return MatchErrorCode::SUCCESS;
 }
 
