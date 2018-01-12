@@ -79,7 +79,7 @@ RUN git submodule update --init --recursive
 RUN export CFLAGS="-O0" && \
     export CXXFLAGS="-O0" && \
     ./autogen.sh && \
-    ./configure --with-proto --with-cli --without-internal-rpc && \
+    ./configure --with-proto --without-internal-rpc && \
     make && \
     make install && ldconfig
 
@@ -102,6 +102,9 @@ RUN export CFLAGS="-O0" && \
     ./autogen.sh && \
     ./configure &&\
     make
+
+WORKDIR /PI/CLI
+RUN ./configure --with-bmv2 && make
 
 WORKDIR /PI/proto/demo_grpc
 RUN ./configure --with-proto --with-bmv2 && \
